@@ -54,10 +54,10 @@ class SettingsWidget(QWidget):
         api_layout.addRow("API 密钥:", self.api_key_edit)
 
         # 模型选择
-        self.model_combo = QComboBox()
-        self.model_combo.addItem("deepseek-chat", "deepseek-chat")
-        self.model_combo.addItem("deepseek-coder", "deepseek-coder")
-        api_layout.addRow("模型:", self.model_combo)
+        self.model_edit = QLineEdit()
+        self.model_edit.setPlaceholderText("输入模型名称，如 deepseek-chat")
+        self.model_edit.setText("deepseek-chat")
+        api_layout.addRow("模型:", self.model_edit)
 
         # 验证按钮
         self.btn_validate = QPushButton("验证密钥")
@@ -88,30 +88,6 @@ class SettingsWidget(QWidget):
 
         api_group.setLayout(api_layout)
         scroll_layout.addWidget(api_group)
-
-        # 提示词模板
-        prompt_group = QGroupBox("提示词模板")
-        prompt_layout = QVBoxLayout()
-
-        self.prompt_text = QTextEdit()
-        self.prompt_text.setPlaceholderText("输入提示词模板...")
-        self.prompt_text.setMinimumHeight(200)
-        prompt_layout.addWidget(self.prompt_text)
-
-        # 模板操作
-        prompt_btn_layout = QHBoxLayout()
-        self.btn_reset_prompt = QPushButton("恢复默认")
-        self.btn_reset_prompt.clicked.connect(self.on_reset_prompt_clicked)
-        prompt_btn_layout.addWidget(self.btn_reset_prompt)
-
-        self.btn_test_prompt = QPushButton("测试模板")
-        self.btn_test_prompt.clicked.connect(self.on_test_prompt_clicked)
-        prompt_btn_layout.addWidget(self.btn_test_prompt)
-        prompt_btn_layout.addStretch()
-        prompt_layout.addLayout(prompt_btn_layout)
-
-        prompt_group.setLayout(prompt_layout)
-        scroll_layout.addWidget(prompt_group)
 
         # 游戏设置
         game_group = QGroupBox("游戏设置")
@@ -173,14 +149,15 @@ class SettingsWidget(QWidget):
         api_config = self.config.api
         deepseek_config = api_config.get("deepseek", {})
 
-        self.api_key_edit.setText(deepseek_config.get("api_key", ""))
-        self.model_combo.setCurrentText(deepseek_config.get("model", "deepseek-chat"))
+        api_key = deepseek_config.get("api_key", "")
+        # 修复重复的 sk- 前缀
+        while api_key.startswith("sk-sk-"):
+            api_key = api_key[3:]  # 去掉一个 sk-
+        self.api_key_edit.setText(api_key)
+        self.model_edit.setText(deepseek_config.get("model", "deepseek-chat"))
         self.temperature_spin.setValue(deepseek_config.get("temperature", 0.7))
         self.max_tokens_spin.setValue(deepseek_config.get("max_tokens", 1000))
         self.timeout_spin.setValue(deepseek_config.get("timeout", 60))
-
-        # 提示词模板
-        self.prompt_text.setText(self.config.prompt_template)
 
         # 游戏设置
         game_config = self.config.game
@@ -196,14 +173,15 @@ class SettingsWidget(QWidget):
         """保存设置"""
         try:
             # API 配置
-            self.config.set("sk-" + self.api_key_edit.text().strip(), "api", "deepseek", "api_key")
-            self.config.set(self.model_combo.currentData(), "api", "deepseek", "model")
+            api_key = self.api_key_edit.text().strip()
+            if api_key and not api_key.startswith("sk-"):
+                api_key = "sk-" + api_key
+            self.config.set(api_key, "api", "deepseek", "api_key")
+            self.config.set(self.model_edit.text(), "api", "deepseek", "model")
             self.config.set(self.temperature_spin.value(), "api", "deepseek", "temperature")
             self.config.set(self.max_tokens_spin.value(), "api", "deepseek", "max_tokens")
             self.config.set(self.timeout_spin.value(), "api", "deepseek", "timeout")
 
-            # 提示词模板
-            self.config.config["prompt_template"] = self.prompt_text.toPlainText()
             self.config.save()
 
             # 游戏设置
@@ -240,43 +218,3 @@ class SettingsWidget(QWidget):
         finally:
             self.btn_validate.setEnabled(True)
             self.btn_validate.setText("验证密钥")
-
-    def on_reset_prompt_clicked(self):
-        """恢复默认提示词"""
-        from config import Config
-        self.prompt_text.setText(Config.DEFAULT_CONFIG["prompt_template"])
-        QMessageBox.information(self, "提示", "已恢复默认提示词模板")
-
-    def on_test_prompt_clicked(self):
-        """测试提示词"""
-        prompt = self.prompt_text.toPlainText()
-
-        # 简单的测试棋盘
-        test_board = """
-    A B C D E F G H I J K L M N O
-  +-------------------------+
- 1| · · · · · · · · · · · · · · │
- 2| · · · · · · · · · · · · · · │
- 3| · · · ● · · · · · · · · · · │
- 4| · · · · · · · · · · · · · · │
- 5| · · · · ○ · · · · · · · · · │
- 6| · · · · · · · · · · · · · · │
- 7| · · · · · · · · · · · · · · │
- 8| · · · · · · · · · · · · · · │
- 9| · · · · · · · · · · · · · · │
-10| · · · · · · · · · · · · · · │
-11| · · · · · · · · · · · · · · │
-12| · · · · · · · · · · · · · · │
-13| · · · · · · · · · · · · · · │
-14| · · · · · · · · · · · · · · │
-15| · · · · · · · · · · · · · · │
-  +-------------------------+
-        """
-
-        # 格式化测试
-        try:
-            formatted = prompt.format(ascii_board=test_board, color="黑")
-            self.prompt_text.setText(formatted)
-            QMessageBox.information(self, "成功", "提示词模板格式正确！")
-        except Exception as e:
-            QMessageBox.warning(self, "错误", f"提示词模板格式错误: {e}")

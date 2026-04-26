@@ -58,6 +58,7 @@ class GameWidget(QWidget):
         # 悔棋相关
         self.undo_count = 0
         self.max_undo = 3
+        self.last_last_move = None  # 上上次落子位置
 
         self._init_ui()
 
@@ -196,6 +197,9 @@ class GameWidget(QWidget):
     def try_place_stone(self, row: int, col: int):
         """尝试落子"""
         if self.board.is_valid_move(row, col):
+            # 更新上上次落子
+            if self.board.last_move:
+                self.last_last_move = self.board.last_move
             self.board.place_stone(row, col, self.current_player)
             self.board_widget.place_stone(row, col, self.current_player)
             self.moveMade.emit(row, col, self.current_player)
@@ -232,6 +236,9 @@ class GameWidget(QWidget):
             move = player.get_move(self.board)
 
             if move and self.board.is_valid_move(move[0], move[1]):
+                # 更新上上次落子
+                if self.board.last_move:
+                    self.last_last_move = self.board.last_move
                 self.board.place_stone(move[0], move[1], self.current_player)
                 self.board_widget.place_stone(move[0], move[1], self.current_player)
                 self.moveMade.emit(move[0], move[1], self.current_player)
@@ -249,8 +256,31 @@ class GameWidget(QWidget):
                 else:
                     self.switch_player()
             else:
-                # AI 无法落子，判负
-                self.end_game(3 - self.current_player)
+                # API 调用失败，显示错误信息
+                error_msg = "API 调用失败，无法获取落子"
+                if hasattr(player, 'last_response') and player.last_response:
+                    error_msg = f"API 错误: {player.last_response[:100]}..."
+                self.response_text.append(f"【{player.name}】{error_msg}")
+                self.info_label.setText(f"{player.name} 获取落子失败")
+
+                # 显示消息框让用户选择
+                reply = QMessageBox.question(
+                    self, "API 调用失败",
+                    f"{player.name} 无法获取落子（API 密钥可能无效或网络错误）。\n\n"
+                    f"请选择操作：\n"
+                    f"是 - 重新尝试\n"
+                    f"否 - 认输并结束游戏\n"
+                    f"取消 - 继续（跳过此回合）",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+
+                if reply == QMessageBox.StandardButton.Yes:
+                    # 重试
+                    QTimer.singleShot(100, self.ai_turn)
+                elif reply == QMessageBox.StandardButton.No:
+                    # 认输
+                    self.end_game(3 - self.current_player)
+                # 取消则继续游戏（允许人类落子或其他 AI 继续）
 
     def start_game(self):
         """开始游戏"""
@@ -269,6 +299,7 @@ class GameWidget(QWidget):
         self.current_player = 1
         self.elapsed_time = 0
         self.undo_count = 0
+        self.last_last_move = None
 
         # 初始化玩家
         ai_level = self.ai_level_combo.currentData()
@@ -369,14 +400,17 @@ class GameWidget(QWidget):
         if not self.is_playing or self.undo_count >= self.max_undo:
             return
 
-        if self.board.undo(1):
-            # 移除棋盘上的棋子
-            if self.board.last_move:
-                row, col = self.board.last_move
-                self.board_widget.remove_stone(row, col)
+        # 保存需要移除的棋子位置（最近两步）
+        move_to_remove = []
+        history_len = len(self.board.move_history)
+        if history_len >= 1:
+            move_to_remove.append(self.board.move_history[-1][:2])  # 最后一步
+        if history_len >= 2:
+            move_to_remove.append(self.board.move_history[-2][:2])  # 上一步
 
-            if self.board.last_last_move:
-                row, col = self.board.last_last_move
+        if self.board.undo(1):
+            # 移除棋盘上的棋子（从视觉上移除最近两步）
+            for row, col in move_to_remove:
                 self.board_widget.remove_stone(row, col)
 
             self.undo_count += 1

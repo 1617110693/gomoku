@@ -50,23 +50,19 @@ class ExternalAIPlayer(Player):
         self.last_move = None
 
     def _default_prompt_template(self) -> str:
-        """默认提示词模板"""
-        return """你是一位世界级的五子棋大师，拥有极高的棋艺和战略眼光。
+        """优化的提示词模板"""
+        return """你是五子棋高手。
 
-游戏规则：
-- 棋盘大小：15×15，行和列都从1开始计数，左上角为(1,1)
-- 黑方先行，双方轮流落子
-- 先在横、竖、斜任意方向连成五子者获胜
+棋盘15×15，"●"是黑棋，"○"是白棋，"·"是空位。
 
-当前棋盘状态：
+当前棋盘：
 {ascii_board}
 
-你是{color}方，现在轮到你落子。
+你是{color}方。
 
-请严格按照以下格式回答：
-1. 局势分析：简要分析当前双方的优劣势和关键要点
-2. 最佳落子：第X行第Y列
-3. 落子理由：解释为什么选择这个位置"""
+请直接给出落子坐标，格式："第R行第C列"，例如：第8行第5列。
+
+只需回答落子位置，不要其他内容。"""
 
     def get_move(self, board) -> Optional[Tuple[int, int]]:
         """
@@ -85,12 +81,20 @@ class ExternalAIPlayer(Player):
         ascii_board = board.to_ascii()
         color_str = "黑" if self.color == 1 else "白"
 
+        # 获取已占用的位置
+        occupied = set()
+        for r in range(board.size):
+            for c in range(board.size):
+                if board.board[r][c] != 0:
+                    occupied.add((r, c))
+
         # 调用 API 获取落子
         self.last_response = ""
 
         try:
             move, response = self.api.get_response_with_retry(
-                ascii_board, color_str, self.prompt_template
+                ascii_board, color_str, self.prompt_template,
+                occupied_moves=occupied
             )
             self.last_response = response
             self.last_move = move

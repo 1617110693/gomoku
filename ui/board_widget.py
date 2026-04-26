@@ -55,6 +55,9 @@ class BoardWidget(QWidget):
         # 落子动画相关
         self.animating_stone = None
 
+        # 悬停位置
+        self._hover_pos = None
+
         # 允许鼠标追踪
         self.setMouseTracking(True)
 
@@ -209,6 +212,8 @@ class BoardWidget(QWidget):
 
     def _draw_hover_indicator(self, painter: QPainter, row: int, col: int):
         """绘制悬停指示器"""
+        if not (0 <= row < self.board_size and 0 <= col < self.board_size):
+            return  # 越界检查
         if self.stones[row][col] != 0:
             return  # 已有棋子不显示
 

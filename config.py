@@ -64,23 +64,6 @@ class Config:
             "min_width": 800,
             "min_height": 600,
         },
-        # 提示词模板
-        "prompt_template": """你是一位世界级的五子棋大师，拥有极高的棋艺和战略眼光。
-
-游戏规则：
-- 棋盘大小：15×15，行和列都从1开始计数，左上角为(1,1)
-- 黑方先行，双方轮流落子
-- 先在横、竖、斜任意方向连成五子者获胜
-
-当前棋盘状态：
-{ascii_board}
-
-你是{color}方，现在轮到你落子。
-
-请严格按照以下格式回答：
-1. 局势分析：简要分析当前双方的优劣势和关键要点
-2. 最佳落子：第X行第Y列
-3. 落子理由：解释为什么选择这个位置，以及后续的战略意图"""
     }
 
     def __init__(self):
@@ -170,8 +153,8 @@ class Config:
 
     @property
     def prompt_template(self):
-        """获取提示词模板"""
-        return self.config.get("prompt_template", self.DEFAULT_CONFIG["prompt_template"])
+        """获取提示词模板（已内置，实际使用时从代码读取）"""
+        return self.config.get("prompt_template", "")
 
 
 # 全局配置实例

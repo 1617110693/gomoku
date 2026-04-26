@@ -36,7 +36,7 @@ class DeepSeekApi(BaseLLMApi):
 
     def validate_api_key(self) -> bool:
         """验证 API 密钥"""
-        if not self.api_key or not self.api_key.startswith("sk-"):
+        if not self.api_key:
             return False
 
         try:
@@ -113,53 +113,52 @@ class DeepSeekApi(BaseLLMApi):
         """
         从 API 响应中解析落子坐标
 
-        支持格式：
-        - "第8行第5列"
-        - "第8行 第5列"
-        - "H5"
-        - "(8,5)"
-        - "8,5"
+        优先从"最佳落子"等关键段落中提取坐标
 
         Args:
             response: API 响应字符串
 
         Returns:
-            Tuple[int, int] or None: (row, col)，使用 1-indexed
+            Tuple[int, int] or None: (row, col)，0-indexed
         """
-        # 尝试多种方式解析
-        # 1. 直接搜索 "第X行第Y列" 格式
-        patterns = [
-            r'第\s*(\d+)\s*行\s*第?\s*(\d+)\s*列',  # 第8行第5列
-            r'\((\d+)\s*,\s*(\d+)\)',  # (8, 5)
-            r'([A-Za-z])(\d+)',  # H5
-        ]
+        # 1. 优先从"最佳落子"附近查找
+        best_move_section = re.search(r'最佳落子[：:\s]*[第(]?\s*(\d+)\s*[行,]\s*第?\s*(\d+)\s*[列)]?', response, re.IGNORECASE)
+        if best_move_section:
+            row, col = int(best_move_section.group(1)), int(best_move_section.group(2))
+            if 1 <= row <= 15 and 1 <= col <= 15:
+                return (row - 1, col - 1)
 
-        for pattern in patterns:
-            match = re.search(pattern, response)
-            if match:
-                if pattern == r'([A-Za-z])(\d+)':
-                    # 字母+数字格式
-                    col_letter = match.group(1).upper()
-                    row = int(match.group(2))
-                    col = ord(col_letter) - ord('A')
-                else:
-                    row = int(match.group(1))
-                    col = int(match.group(2))
-
-                if 1 <= row <= 15 and 1 <= col <= 15:
-                    return (row - 1, col - 1)  # 转换为 0-indexed
-
-        # 2. 尝试直接在回复中搜索数字坐标
-        # 查找类似 "8, 5" 或 "8 5" 的模式
-        match = re.search(r'(\d+)\s*[,\s]\s*(\d+)', response)
-        if match:
+        # 2. 查找 "第X行第Y列" 格式（从后往前找，取最后一个）
+        matches = list(re.finditer(r'第\s*(\d+)\s*行\s*第?\s*(\d+)\s*列', response))
+        if matches:
+            # 取最后一个匹配（通常是最终的落子建议）
+            match = matches[-1]
             row, col = int(match.group(1)), int(match.group(2))
             if 1 <= row <= 15 and 1 <= col <= 15:
                 return (row - 1, col - 1)
 
-        # 3. 查找中文字符"行"和"列"附近
-        match = re.search(r'行.*?(\d+).*?列.*?(\d+)', response)
-        if match:
+        # 3. 字母+数字格式，如 H5（从后往前找）
+        matches = list(re.finditer(r'([A-Za-z])(\d+)', response))
+        if matches:
+            match = matches[-1]
+            col_letter = match.group(1).upper()
+            row = int(match.group(2))
+            col = ord(col_letter) - ord('A') + 1  # A=1, B=2, ...
+            if 1 <= row <= 15 and 1 <= col <= 15:
+                return (row - 1, col - 1)
+
+        # 4. (X, Y) 格式（从后往前找）
+        matches = list(re.finditer(r'\(\s*(\d+)\s*,\s*(\d+)\s*\)', response))
+        if matches:
+            match = matches[-1]
+            row, col = int(match.group(1)), int(match.group(2))
+            if 1 <= row <= 15 and 1 <= col <= 15:
+                return (row - 1, col - 1)
+
+        # 5. X, Y 格式（需要更严格的上下文）
+        matches = list(re.finditer(r'(\d+)\s*,\s*(\d+)', response))
+        if matches:
+            match = matches[-1]
             row, col = int(match.group(1)), int(match.group(2))
             if 1 <= row <= 15 and 1 <= col <= 15:
                 return (row - 1, col - 1)
@@ -168,7 +167,8 @@ class DeepSeekApi(BaseLLMApi):
 
     def get_response_with_retry(self, ascii_board: str, color: str,
                                  prompt_template: str,
-                                 max_retries: int = 3) -> Tuple[Optional[Tuple[int, int]], str]:
+                                 max_retries: int = 3,
+                                 occupied_moves: set = None) -> Tuple[Optional[Tuple[int, int]], str]:
         """
         获取落子，带重试机制
 
@@ -177,11 +177,13 @@ class DeepSeekApi(BaseLLMApi):
             color: 当前玩家颜色
             prompt_template: 提示词模板
             max_retries: 最大重试次数
+            occupied_moves: 已被占用的位置集合 {(row, col), ...}
 
         Returns:
             Tuple[落子位置, 响应内容]
         """
         last_response = ""
+        occupied = occupied_moves or set()
 
         for attempt in range(max_retries):
             try:
@@ -190,11 +192,15 @@ class DeepSeekApi(BaseLLMApi):
 
                 move = self.parse_move(response)
                 if move is not None:
-                    return move, response
+                    # 检查是否已被占用
+                    if move not in occupied:
+                        return move, response
+                    else:
+                        self.logger.error(f"API 返回的位置 {move} 已被占用，重试...")
 
                 if attempt < max_retries - 1:
                     # 添加错误纠正提示
-                    correction = "\n\n请注意，您的落子格式不明确。请明确说出落子位置，例如：第8行第5列。"
+                    correction = f"\n\n请注意，您之前选择的位置已被占用。请重新分析棋盘并选择一个空位。例如：第8行第5列。"
                     prompt_template = prompt_template + correction
 
             except Exception as e:
